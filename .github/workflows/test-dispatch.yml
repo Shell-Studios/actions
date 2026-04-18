@@ -1,0 +1,126 @@
+name: "Addon – Manual Test Dispatch"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Called from add-on repos with workflow_dispatch OR from another workflow.
+# Lets you test individual steps without doing a full release.
+#
+#   jobs:
+#     test:
+#       uses: YOUR-ORG/addon-ci/.github/workflows/test-dispatch.yml@v1
+#       with:
+#         test-mode: compile-only
+#       secrets:
+#         DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  workflow_call:
+    inputs:
+      test-mode:
+        description: |
+          What to test:
+            compile-only      → compile TS, no packaging
+            package-only      → compile + package, no release, no notify
+            notify-test       → send a test Discord notification (no release)
+            full-dry-run      → compile + package, no release, no notify
+        type: string
+        required: true
+      addon-name:
+        type: string
+        required: false
+        default: ""
+      working-directory:
+        type: string
+        required: false
+        default: "."
+      fake-version:
+        description: "Version string to use when packaging in dry-run mode"
+        type: string
+        required: false
+        default: "0.0.0-test"
+    secrets:
+      DISCORD_WEBHOOK:
+        required: false
+      DISCORD_WEBHOOK_BETA:
+        required: false
+
+  # Also allow triggering directly from this repo for quick tests
+  workflow_dispatch:
+    inputs:
+      test-mode:
+        description: "Test mode"
+        type: choice
+        required: true
+        options:
+          - compile-only
+          - package-only
+          - notify-test
+          - full-dry-run
+      addon-name:
+        type: string
+        required: false
+        default: ""
+      fake-version:
+        type: string
+        required: false
+        default: "0.0.0-test"
+
+jobs:
+  test-compile:
+    name: "Test: Compile TS"
+    if: ${{ contains(fromJson('["compile-only","package-only","full-dry-run","notify-test"]'), inputs.test-mode) }}
+    runs-on: ubuntu-latest
+    outputs:
+      ts-compiled: ${{ steps.compile.outputs.ts-compiled }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile TS
+        id: compile
+        uses: YOUR-ORG/addon-ci/actions/compile-ts@v1
+        with:
+          working-directory: ${{ inputs.working-directory }}
+
+  test-package:
+    name: "Test: Package"
+    if: ${{ contains(fromJson('["package-only","full-dry-run"]'), inputs.test-mode) }}
+    runs-on: ubuntu-latest
+    needs: test-compile
+    outputs:
+      package-name: ${{ steps.package.outputs.package-name }}
+      package-path: ${{ steps.package.outputs.package-path }}
+      addon-type:   ${{ steps.package.outputs.addon-type }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Package add-on (dry run)
+        id: package
+        uses: YOUR-ORG/addon-ci/actions/package-addon@v1
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          addon-name: ${{ inputs.addon-name != '' && inputs.addon-name || github.event.repository.name }}
+          version:    ${{ inputs.fake-version }}
+
+      - name: Upload artifact (for inspection)
+        uses: actions/upload-artifact@v4
+        with:
+          name: dry-run-package
+          path: ${{ steps.package.outputs.package-path }}
+          retention-days: 3
+
+  test-notify:
+    name: "Test: Discord Notification"
+    if: ${{ inputs.test-mode == 'notify-test' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Send test notification
+        uses: YOUR-ORG/addon-ci/actions/notify-discord@v1
+        with:
+          version:          "v0.0.0-test"
+          addon-name:       "${{ inputs.addon-name != '' && inputs.addon-name || github.event.repository.name }} [TEST]"
+          release-url:      "https://github.com/${{ github.repository }}"
+          package-name:     "test-package.mcaddon"
+          addon-type:       "mcaddon"
+          is-prerelease:    "false"
+          release-notes-path: "release_notes.md"
+          webhook-url:      ${{ secrets.DISCORD_WEBHOOK }}
+          webhook-url-beta: ${{ secrets.DISCORD_WEBHOOK_BETA }}

@@ -1,0 +1,49 @@
+name: "Compile TypeScript"
+description: "Compiles TypeScript source files if tsconfig.json is present. Safe to run even if there is no TS."
+
+inputs:
+  working-directory:
+    description: "Root directory of the add-on repo"
+    required: false
+    default: "."
+
+outputs:
+  ts-compiled:
+    description: "true if TypeScript was compiled, false if skipped"
+    value: ${{ steps.check.outputs.has_ts }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Check for tsconfig.json
+      id: check
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        if [ -f "tsconfig.json" ]; then
+          echo "has_ts=true" >> "$GITHUB_OUTPUT"
+          echo "::notice::tsconfig.json found – TypeScript will be compiled."
+        else
+          echo "has_ts=false" >> "$GITHUB_OUTPUT"
+          echo "::notice::No tsconfig.json found – skipping TypeScript compilation."
+        fi
+
+    - name: Set up Node.js
+      if: steps.check.outputs.has_ts == 'true'
+      uses: actions/setup-node@v4
+      with:
+        node-version: "20"
+        cache: "npm"
+        cache-dependency-path: ${{ inputs.working-directory }}/package-lock.json
+
+    - name: Install dependencies
+      if: steps.check.outputs.has_ts == 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: npm ci
+
+    - name: Compile TypeScript
+      if: steps.check.outputs.has_ts == 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: npx tsc --noEmit false

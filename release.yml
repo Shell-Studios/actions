@@ -1,0 +1,53 @@
+name: "Release"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# This is THE ONLY workflow file you need in each add-on repo.
+# Copy this file to:  .github/workflows/release.yml
+#
+# All the logic lives in:  YOUR-ORG/addon-ci
+# To update all repos at once, just bump the tag in the `uses:` lines below.
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  push:
+    tags:
+      - "v*"          # v1.2.3  →  stable release
+      - "v*-beta*"    # v1.2.3-beta.1  →  pre-release
+      - "v*-alpha*"   # v1.2.3-alpha.1 →  pre-release
+
+  workflow_dispatch:
+    inputs:
+      test-mode:
+        description: "Run a specific test instead of a full release"
+        type: choice
+        required: true
+        default: compile-only
+        options:
+          - compile-only
+          - package-only
+          - notify-test
+          - full-dry-run
+
+jobs:
+  # ── Full release pipeline (triggered by tag push) ──────────────────────────
+  release:
+    if: github.event_name == 'push'
+    uses: YOUR-ORG/addon-ci/.github/workflows/release.yml@v1   # ← bump version here to update
+    with:
+      addon-name: "My Awesome Addon"   # ← set your display name
+      # working-directory: "."         # ← uncomment if addon is in a subfolder
+      # release-notes-path: "release_notes.md"
+    secrets:
+      DISCORD_WEBHOOK:      ${{ secrets.DISCORD_WEBHOOK }}
+      DISCORD_WEBHOOK_BETA: ${{ secrets.DISCORD_WEBHOOK_BETA }}
+
+  # ── Manual test dispatch ────────────────────────────────────────────────────
+  test:
+    if: github.event_name == 'workflow_dispatch'
+    uses: YOUR-ORG/addon-ci/.github/workflows/test-dispatch.yml@v1
+    with:
+      test-mode: ${{ inputs.test-mode }}
+      addon-name: "My Awesome Addon"
+    secrets:
+      DISCORD_WEBHOOK:      ${{ secrets.DISCORD_WEBHOOK }}
+      DISCORD_WEBHOOK_BETA: ${{ secrets.DISCORD_WEBHOOK_BETA }}

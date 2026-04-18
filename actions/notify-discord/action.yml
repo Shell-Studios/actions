@@ -1,0 +1,111 @@
+name: "Notify Discord"
+description: |
+  Sends a rich embed notification to a Discord webhook.
+  Uses the stable webhook (DISCORD_WEBHOOK) for normal releases and
+  the beta webhook (DISCORD_WEBHOOK_BETA) for pre-releases.
+
+inputs:
+  version:
+    description: "Release version string (e.g. v1.2.3)"
+    required: true
+  addon-name:
+    description: "Human-readable name of the add-on"
+    required: true
+  release-url:
+    description: "URL to the GitHub Release page"
+    required: true
+  package-name:
+    description: "Filename of the packaged add-on"
+    required: true
+  addon-type:
+    description: "mcaddon | mcpack-bp | mcpack-rp"
+    required: true
+  is-prerelease:
+    description: "true for pre-release / beta builds"
+    required: true
+  release-notes-path:
+    description: "Path to release_notes.md (optional – used as embed description)"
+    required: false
+    default: "release_notes.md"
+  webhook-url:
+    description: "Discord webhook URL for stable releases"
+    required: true
+  webhook-url-beta:
+    description: "Discord webhook URL for beta/pre-release (falls back to webhook-url if empty)"
+    required: false
+    default: ""
+
+runs:
+  using: "composite"
+  steps:
+    - name: Send Discord notification
+      shell: bash
+      env:
+        VERSION:            ${{ inputs.version }}
+        ADDON_NAME:         ${{ inputs.addon-name }}
+        RELEASE_URL:        ${{ inputs.release-url }}
+        PACKAGE_NAME:       ${{ inputs.package-name }}
+        ADDON_TYPE:         ${{ inputs.addon-type }}
+        IS_PRERELEASE:      ${{ inputs.is-prerelease }}
+        NOTES_PATH:         ${{ inputs.release-notes-path }}
+        WEBHOOK_URL:        ${{ inputs.webhook-url }}
+        WEBHOOK_URL_BETA:   ${{ inputs.webhook-url-beta }}
+      run: |
+        # ── Choose the right webhook ────────────────────────────────────────
+        if [ "$IS_PRERELEASE" = "true" ] && [ -n "$WEBHOOK_URL_BETA" ]; then
+          TARGET_WEBHOOK="$WEBHOOK_URL_BETA"
+          LABEL="Beta Release 🧪"
+          COLOR=16753920   # orange  0xFFA500
+        else
+          TARGET_WEBHOOK="$WEBHOOK_URL"
+          LABEL="New Release 🎉"
+          COLOR=5763719    # green   0x57F287
+        fi
+
+        # ── Read release notes (first 1000 chars to stay within embed limits) 
+        if [ -f "$NOTES_PATH" ]; then
+          DESCRIPTION=$(head -c 1000 "$NOTES_PATH")
+        else
+          DESCRIPTION="No release notes provided."
+        fi
+
+        # ── Escape for JSON ──────────────────────────────────────────────────
+        DESCRIPTION_JSON=$(echo "$DESCRIPTION" | python3 -c "
+        import sys, json
+        print(json.dumps(sys.stdin.read()))
+        ")
+
+        # ── Build payload ────────────────────────────────────────────────────
+        PAYLOAD=$(cat <<EOF
+        {
+          "username": "Addon CI",
+          "avatar_url": "https://raw.githubusercontent.com/github/explore/main/topics/github-actions/github-actions.png",
+          "embeds": [
+            {
+              "title": "${LABEL}: ${ADDON_NAME} ${VERSION}",
+              "url": "${RELEASE_URL}",
+              "description": ${DESCRIPTION_JSON},
+              "color": ${COLOR},
+              "fields": [
+                { "name": "📦 Package",  "value": "\`${PACKAGE_NAME}\`", "inline": true },
+                { "name": "🗂️ Type",     "value": "\`${ADDON_TYPE}\`",   "inline": true },
+                { "name": "🔗 Download", "value": "[GitHub Release](${RELEASE_URL})", "inline": false }
+              ],
+              "footer": { "text": "GitHub Actions • addon-ci" }
+            }
+          ]
+        }
+        EOF
+        )
+
+        HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+          -H "Content-Type: application/json" \
+          -d "$PAYLOAD" \
+          "$TARGET_WEBHOOK")
+
+        if [ "$HTTP_STATUS" -ge 200 ] && [ "$HTTP_STATUS" -lt 300 ]; then
+          echo "::notice::Discord notification sent (HTTP $HTTP_STATUS)."
+        else
+          echo "::error::Discord webhook failed (HTTP $HTTP_STATUS)."
+          exit 1
+        fi

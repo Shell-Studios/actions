@@ -1,0 +1,79 @@
+name: "Create GitHub Release"
+description: |
+  Creates a GitHub Release (or pre-release for beta tags) and uploads the
+  packaged add-on file as a release asset.
+  Pre-release is auto-detected when the version contains a hyphen (e.g. 1.0.0-beta.1).
+
+inputs:
+  version:
+    description: "Version tag (e.g. v1.2.3 or v1.2.3-beta.1)"
+    required: true
+  package-path:
+    description: "Path to the package file to upload"
+    required: true
+  package-name:
+    description: "Display name for the uploaded asset"
+    required: true
+  release-notes-path:
+    description: "Path to the release notes markdown file"
+    required: false
+    default: "release_notes.md"
+  github-token:
+    description: "GitHub token with write:releases permission"
+    required: true
+
+outputs:
+  release-url:
+    description: "HTML URL of the created release"
+    value: ${{ steps.release.outputs.url }}
+  is-prerelease:
+    description: "true if this is a pre-release"
+    value: ${{ steps.flags.outputs.is_prerelease }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Determine release flags
+      id: flags
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+      run: |
+        # A hyphen in the version (after stripping leading 'v') means pre-release
+        BARE="${VERSION#v}"
+        if [[ "$BARE" == *"-"* ]]; then
+          echo "is_prerelease=true"  >> "$GITHUB_OUTPUT"
+          echo "::notice::Tag contains pre-release suffix → marking as pre-release."
+        else
+          echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Read release notes
+      id: notes
+      shell: bash
+      env:
+        NOTES_PATH: ${{ inputs.release-notes-path }}
+      run: |
+        if [ -f "$NOTES_PATH" ]; then
+          # Escape for use in multiline GITHUB_OUTPUT
+          {
+            echo "body<<RELEASE_NOTES_EOF"
+            cat "$NOTES_PATH"
+            echo "RELEASE_NOTES_EOF"
+          } >> "$GITHUB_OUTPUT"
+          echo "::notice::Release notes loaded from $NOTES_PATH"
+        else
+          echo 'body=No release notes provided.' >> "$GITHUB_OUTPUT"
+          echo "::warning::$NOTES_PATH not found – release will have no notes."
+        fi
+
+    - name: Create release and upload asset
+      id: release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name:   ${{ inputs.version }}
+        name:       ${{ inputs.version }}
+        body:       ${{ steps.notes.outputs.body }}
+        prerelease: ${{ steps.flags.outputs.is_prerelease }}
+        files:      ${{ inputs.package-path }}
+        token:      ${{ inputs.github-token }}

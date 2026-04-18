@@ -1,0 +1,106 @@
+name: "Package Add-on"
+description: |
+  Detects whether the add-on has a BP, RP, or both, then packages it as:
+    - .mcaddon  → both BP and RP present
+    - .mcpack   → only BP or only RP present
+  Expected folder structure (any of these combinations):
+    addon-repo/
+      behavior_pack/    (or BP/)
+      resource_pack/    (or RP/)
+
+inputs:
+  working-directory:
+    description: "Root directory of the add-on repo"
+    required: false
+    default: "."
+  addon-name:
+    description: "Base name for the output file (e.g. my-addon). Defaults to the repo name."
+    required: false
+    default: ""
+  version:
+    description: "Version string to embed in the filename (e.g. 1.2.3)"
+    required: true
+
+outputs:
+  package-path:
+    description: "Path to the generated package file (relative to working-directory)"
+    value: ${{ steps.pack.outputs.package_path }}
+  package-name:
+    description: "Filename of the generated package"
+    value: ${{ steps.pack.outputs.package_name }}
+  addon-type:
+    description: "Detected type: mcaddon | mcpack-bp | mcpack-rp"
+    value: ${{ steps.detect.outputs.addon_type }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Detect pack folders
+      id: detect
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        # Accepts both casing variants
+        BP_DIR=""
+        RP_DIR=""
+
+        for d in behavior_pack BP; do
+          if [ -d "$d" ]; then BP_DIR="$d"; break; fi
+        done
+        for d in resource_pack RP; do
+          if [ -d "$d" ]; then RP_DIR="$d"; break; fi
+        done
+
+        echo "bp_dir=$BP_DIR"  >> "$GITHUB_OUTPUT"
+        echo "rp_dir=$RP_DIR"  >> "$GITHUB_OUTPUT"
+
+        if [ -n "$BP_DIR" ] && [ -n "$RP_DIR" ]; then
+          echo "addon_type=mcaddon"     >> "$GITHUB_OUTPUT"
+          echo "extension=mcaddon"      >> "$GITHUB_OUTPUT"
+          echo "::notice::Both BP and RP detected → .mcaddon"
+        elif [ -n "$BP_DIR" ]; then
+          echo "addon_type=mcpack-bp"   >> "$GITHUB_OUTPUT"
+          echo "extension=mcpack"       >> "$GITHUB_OUTPUT"
+          echo "::notice::Only BP detected → .mcpack"
+        elif [ -n "$RP_DIR" ]; then
+          echo "addon_type=mcpack-rp"   >> "$GITHUB_OUTPUT"
+          echo "extension=mcpack"       >> "$GITHUB_OUTPUT"
+          echo "::notice::Only RP detected → .mcpack"
+        else
+          echo "::error::No behavior_pack/BP or resource_pack/RP folder found!"
+          exit 1
+        fi
+
+    - name: Build package
+      id: pack
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        ADDON_NAME: ${{ inputs.addon-name != '' && inputs.addon-name || github.event.repository.name }}
+        VERSION:    ${{ inputs.version }}
+        BP_DIR:     ${{ steps.detect.outputs.bp_dir }}
+        RP_DIR:     ${{ steps.detect.outputs.rp_dir }}
+        EXT:        ${{ steps.detect.outputs.extension }}
+      run: |
+        PACKAGE_NAME="${ADDON_NAME}-${VERSION}.${EXT}"
+        STAGING_DIR="_staging_${ADDON_NAME}"
+
+        mkdir -p "$STAGING_DIR"
+
+        # For .mcaddon both packs go inside; for .mcpack only the detected one
+        if [ -n "$BP_DIR" ]; then
+          cp -r "$BP_DIR" "$STAGING_DIR/"
+        fi
+        if [ -n "$RP_DIR" ]; then
+          cp -r "$RP_DIR" "$STAGING_DIR/"
+        fi
+
+        # Zip → rename extension
+        cd "$STAGING_DIR"
+        zip -r "../${PACKAGE_NAME}" .
+        cd ..
+        rm -rf "$STAGING_DIR"
+
+        echo "package_name=${PACKAGE_NAME}" >> "$GITHUB_OUTPUT"
+        echo "package_path=${PACKAGE_NAME}" >> "$GITHUB_OUTPUT"
+        echo "::notice::Package created: ${PACKAGE_NAME}"
