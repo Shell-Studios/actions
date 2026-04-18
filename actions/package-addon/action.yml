@@ -3,10 +3,11 @@ description: |
   Detects whether the add-on has a BP, RP, or both, then packages it as:
     - .mcaddon  → both BP and RP present
     - .mcpack   → only BP or only RP present
-  Expected folder structure (any of these combinations):
+  Expected folder structure:
     addon-repo/
-      behavior_pack/    (or BP/)
-      resource_pack/    (or RP/)
+      addon/
+        behavior_pack/
+        resource_pack/
 
 inputs:
   working-directory:
@@ -40,16 +41,12 @@ runs:
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: |
-        # Accepts both casing variants
         BP_DIR=""
         RP_DIR=""
 
-        for d in behavior_pack BP; do
-          if [ -d "$d" ]; then BP_DIR="$d"; break; fi
-        done
-        for d in resource_pack RP; do
-          if [ -d "$d" ]; then RP_DIR="$d"; break; fi
-        done
+        [ -d "addon/behavior_pack" ] && BP_DIR="addon/behavior_pack"
+        [ -d "addon/resource_pack" ] && RP_DIR="addon/resource_pack"
+
 
         echo "bp_dir=$BP_DIR"  >> "$GITHUB_OUTPUT"
         echo "rp_dir=$RP_DIR"  >> "$GITHUB_OUTPUT"
@@ -77,10 +74,10 @@ runs:
       working-directory: ${{ inputs.working-directory }}
       env:
         ADDON_NAME: ${{ inputs.addon-name != '' && inputs.addon-name || github.event.repository.name }}
-        VERSION:    ${{ inputs.version }}
-        BP_DIR:     ${{ steps.detect.outputs.bp_dir }}
-        RP_DIR:     ${{ steps.detect.outputs.rp_dir }}
-        EXT:        ${{ steps.detect.outputs.extension }}
+        VERSION: ${{ inputs.version }}
+        BP_DIR: ${{ steps.detect.outputs.bp_dir }}
+        RP_DIR: ${{ steps.detect.outputs.rp_dir }}
+        EXT: ${{ steps.detect.outputs.extension }}
       run: |
         PACKAGE_NAME="${ADDON_NAME}-${VERSION}.${EXT}"
         STAGING_DIR="_staging_${ADDON_NAME}"
