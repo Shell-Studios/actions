@@ -1,30 +1,28 @@
 name: "Addon – Manual Test Dispatch"
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Called from add-on repos with workflow_dispatch OR from another workflow.
-# Lets you test individual steps without doing a full release.
-#
-#   jobs:
-#     test:
-#       uses: shell-studios/actions/.github/workflows/test-dispatch.yml@v1
-#       with:
-#         test-mode: compile-only
-#       secrets:
-#         DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-# ─────────────────────────────────────────────────────────────────────────────
-
 on:
   workflow_call:
     inputs:
-      test-mode:
-        description: |
-          What to test:
-            compile-only      → compile TS, no packaging
-            package-only      → compile + package, no release, no notify
-            notify-test       → send a test Discord notification (no release)
-            full-dry-run      → compile + package, no release, no notify
-        type: string
-        required: true
+      compile:
+        description: "Run TypeScript compilation"
+        type: boolean
+        required: false
+        default: true
+      pack:
+        description: "Run packaging"
+        type: boolean
+        required: false
+        default: true
+      release:
+        description: "Publish GitHub Release"
+        type: boolean
+        required: false
+        default: false
+      notify:
+        description: "Send Discord notification"
+        type: boolean
+        required: false
+        default: true
       addon-name:
         type: string
         required: false
@@ -33,94 +31,144 @@ on:
         type: string
         required: false
         default: "."
+      release-notes-path:
+        type: string
+        required: false
+        default: "release_notes.md"
       fake-version:
-        description: "Version string to use when packaging in dry-run mode"
+        description: "Version string to use when packaging (no real tag needed)"
         type: string
         required: false
         default: "0.0.0-test"
+      force-prerelease:
+        description: "Simulate a beta notification even without a -beta tag"
+        type: boolean
+        required: false
+        default: false
+      webhook-override:
+        description: "Custom webhook URL — overrides DISCORD_WEBHOOK secret"
+        type: string
+        required: false
+        default: ""
+      webhook-beta-override:
+        description: "Custom beta webhook URL — overrides DISCORD_WEBHOOK_BETA secret"
+        type: string
+        required: false
+        default: ""
     secrets:
       DISCORD_WEBHOOK:
         required: false
       DISCORD_WEBHOOK_BETA:
         required: false
 
-  # Also allow triggering directly from this repo for quick tests
   workflow_dispatch:
     inputs:
-      test-mode:
-        description: "Test mode"
-        type: choice
-        required: true
-        options:
-          - compile-only
-          - package-only
-          - notify-test
-          - full-dry-run
-      addon-name:
-        type: string
-        required: false
-        default: ""
+      compile:
+        description: "Compile TypeScript"
+        type: boolean
+        default: true
+      pack:
+        description: "Package add-on"
+        type: boolean
+        default: true
+      release:
+        description: "Publish GitHub Release"
+        type: boolean
+        default: false
+      notify:
+        description: "Send Discord notification"
+        type: boolean
+        default: true
       fake-version:
+        description: "Version string for packaging (e.g. 0.0.0-test)"
         type: string
-        required: false
         default: "0.0.0-test"
+      force-prerelease:
+        description: "Force beta webhook for notification test"
+        type: boolean
+        default: false
+      webhook-override:
+        description: "Paste a webhook URL here to test without touching secrets"
+        type: string
+        default: ""
+      webhook-beta-override:
+        description: "Paste a beta webhook URL here to test without touching secrets"
+        type: string
+        default: ""
 
 jobs:
-  test-compile:
+  compile:
     name: "Test: Compile TS"
-    if: ${{ contains(fromJson('["compile-only","package-only","full-dry-run","notify-test"]'), inputs.test-mode) }}
+    if: ${{ inputs.compile }}
     runs-on: ubuntu-latest
-    outputs:
-      ts-compiled: ${{ steps.compile.outputs.ts-compiled }}
     steps:
       - uses: actions/checkout@v4
-      - name: Compile TS
-        id: compile
-        uses: shell-studios/actions/actions/compile-ts@v1
+      - uses: YOUR-ORG/addon-ci/actions/compile-ts@v1
         with:
           working-directory: ${{ inputs.working-directory }}
 
-  test-package:
+  pack:
     name: "Test: Package"
-    if: ${{ contains(fromJson('["package-only","full-dry-run"]'), inputs.test-mode) }}
+    if: ${{ inputs.pack }}
     runs-on: ubuntu-latest
-    needs: test-compile
+    needs: compile
     outputs:
       package-name: ${{ steps.package.outputs.package-name }}
       package-path: ${{ steps.package.outputs.package-path }}
       addon-type:   ${{ steps.package.outputs.addon-type }}
     steps:
       - uses: actions/checkout@v4
+
       - name: Package add-on (dry run)
         id: package
-        uses: shell-studios/actions/actions/package-addon@v1
+        uses: YOUR-ORG/addon-ci/actions/package-addon@v1
         with:
           working-directory: ${{ inputs.working-directory }}
           addon-name: ${{ inputs.addon-name != '' && inputs.addon-name || github.event.repository.name }}
           version:    ${{ inputs.fake-version }}
 
-      - name: Upload artifact (for inspection)
+      - name: Upload artifact for inspection
         uses: actions/upload-artifact@v4
         with:
           name: dry-run-package
           path: ${{ steps.package.outputs.package-path }}
           retention-days: 3
 
-  test-notify:
-    name: "Test: Discord Notification"
-    if: ${{ inputs.test-mode == 'notify-test' }}
+  release:
+    name: "Test: GitHub Release"
+    if: ${{ inputs.pack && inputs.release }}
     runs-on: ubuntu-latest
+    needs: pack
+    outputs:
+      release-url: ${{ steps.release.outputs.release-url }}
     steps:
       - uses: actions/checkout@v4
-      - name: Send test notification
-        uses: shell-studios/actions/actions/notify-discord@v1
+      - name: Create GitHub Release
+        id: release
+        uses: YOUR-ORG/addon-ci/actions/create-release@v1
         with:
-          version:          "v0.0.0-test"
-          addon-name:       "${{ inputs.addon-name != '' && inputs.addon-name || github.event.repository.name }} [TEST]"
-          release-url:      "https://github.com/${{ github.repository }}"
-          package-name:     "test-package.mcaddon"
-          addon-type:       "mcaddon"
-          is-prerelease:    "false"
-          release-notes-path: "release_notes.md"
-          webhook-url:      ${{ secrets.DISCORD_WEBHOOK }}
-          webhook-url-beta: ${{ secrets.DISCORD_WEBHOOK_BETA }}
+          version:            ${{ inputs.fake-version }}
+          package-path:       ${{ needs.pack.outputs.package-path }}
+          package-name:       ${{ needs.pack.outputs.package-name }}
+          release-notes-path: ${{ inputs.release-notes-path }}
+          github-token:       ${{ github.token }}
+
+  notify:
+    name: "Test: Discord Notification"
+    if: ${{ always() && !failure() && inputs.notify }}
+    runs-on: ubuntu-latest
+    needs: [pack, release]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Send notification
+        uses: YOUR-ORG/addon-ci/actions/notify-discord@v1
+        with:
+          version:            ${{ inputs.fake-version }}
+          addon-name:         "${{ inputs.addon-name != '' && inputs.addon-name || github.event.repository.name }} [TEST]"
+          release-url:        ${{ needs.release.outputs.release-url != '' && needs.release.outputs.release-url || format('https://github.com/{0}', github.repository) }}
+          package-name:       ${{ needs.pack.outputs.package-name != '' && needs.pack.outputs.package-name || 'dry-run.mcaddon' }}
+          addon-type:         ${{ needs.pack.outputs.addon-type != '' && needs.pack.outputs.addon-type || 'mcaddon' }}
+          is-prerelease:      ${{ inputs.force-prerelease }}
+          release-notes-path: ${{ inputs.release-notes-path }}
+          webhook-url:        ${{ inputs.webhook-override != '' && inputs.webhook-override || secrets.DISCORD_WEBHOOK }}
+          webhook-url-beta:   ${{ inputs.webhook-beta-override != '' && inputs.webhook-beta-override || secrets.DISCORD_WEBHOOK_BETA }}
