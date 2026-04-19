@@ -57,7 +57,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Compile TS
         id: compile
-        uses: YOUR-ORG/addon-ci/actions/compile-ts@v1
+        uses: shell-studios/actions/actions/compile-ts@v1
         with:
           working-directory: ${{ inputs.working-directory }}
 
@@ -82,7 +82,7 @@ jobs:
 
       - name: Package add-on
         id: package
-        uses: YOUR-ORG/addon-ci/actions/package-addon@v1
+        uses: shell-studios/actions/actions/package-addon@v1
         with:
           working-directory: ${{ inputs.working-directory }}
           addon-name: ${{ inputs.addon-name != '' && inputs.addon-name || github.event.repository.name }}
@@ -91,7 +91,7 @@ jobs:
       - name: Create GitHub Release
         id: release
         if: ${{ inputs.release }}
-        uses: YOUR-ORG/addon-ci/actions/create-release@v1
+        uses: shell-studios/actions/actions/create-release@v1
         with:
           version:            ${{ steps.ver.outputs.version }}
           package-path:       ${{ steps.package.outputs.package-path }}
@@ -107,7 +107,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Send notification
-        uses: YOUR-ORG/addon-ci/actions/notify-discord@v1
+        uses: shell-studios/actions/actions/notify-discord@v1
         with:
           version:            ${{ needs.release.outputs.version }}
           addon-name:         ${{ inputs.addon-name != '' && inputs.addon-name || github.event.repository.name }}
