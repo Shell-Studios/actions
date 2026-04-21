@@ -8,6 +8,10 @@ description: |
       addon/
         behavior_pack/
         resource_pack/
+      dist/             ← compiled JS (injected into BP/scripts/ at pack time, never committed)
+
+  Scripts flow:
+    scripts/*.ts  →  compile-ts action  →  dist/*.js  →  injected here  →  dist cleaned up
 
 inputs:
   working-directory:
@@ -47,25 +51,39 @@ runs:
         [ -d "addon/behavior_pack" ] && BP_DIR="addon/behavior_pack"
         [ -d "addon/resource_pack" ] && RP_DIR="addon/resource_pack"
 
-
-        echo "bp_dir=$BP_DIR"  >> "$GITHUB_OUTPUT"
-        echo "rp_dir=$RP_DIR"  >> "$GITHUB_OUTPUT"
+        echo "bp_dir=$BP_DIR" >> "$GITHUB_OUTPUT"
+        echo "rp_dir=$RP_DIR" >> "$GITHUB_OUTPUT"
 
         if [ -n "$BP_DIR" ] && [ -n "$RP_DIR" ]; then
-          echo "addon_type=mcaddon"     >> "$GITHUB_OUTPUT"
-          echo "extension=mcaddon"      >> "$GITHUB_OUTPUT"
+          echo "addon_type=mcaddon"  >> "$GITHUB_OUTPUT"
+          echo "extension=mcaddon"   >> "$GITHUB_OUTPUT"
           echo "::notice::Both BP and RP detected → .mcaddon"
         elif [ -n "$BP_DIR" ]; then
-          echo "addon_type=mcpack-bp"   >> "$GITHUB_OUTPUT"
-          echo "extension=mcpack"       >> "$GITHUB_OUTPUT"
+          echo "addon_type=mcpack-bp" >> "$GITHUB_OUTPUT"
+          echo "extension=mcpack"     >> "$GITHUB_OUTPUT"
           echo "::notice::Only BP detected → .mcpack"
         elif [ -n "$RP_DIR" ]; then
-          echo "addon_type=mcpack-rp"   >> "$GITHUB_OUTPUT"
-          echo "extension=mcpack"       >> "$GITHUB_OUTPUT"
+          echo "addon_type=mcpack-rp" >> "$GITHUB_OUTPUT"
+          echo "extension=mcpack"     >> "$GITHUB_OUTPUT"
           echo "::notice::Only RP detected → .mcpack"
         else
-          echo "::error::No behavior_pack/BP or resource_pack/RP folder found!"
+          echo "::error::No addon/behavior_pack or addon/resource_pack folder found!"
           exit 1
+        fi
+
+    - name: Inject compiled scripts
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        BP_DIR: ${{ steps.detect.outputs.bp_dir }}
+      run: |
+        if [ -d "dist" ] && [ -n "$(ls -A dist)" ]; then
+          mkdir -p "${BP_DIR}/scripts"
+          cp -r dist/* "${BP_DIR}/scripts/"
+          rm -rf dist
+          echo "::notice::dist/* injected into ${BP_DIR}/scripts/ — dist cleaned up."
+        else
+          echo "::notice::No dist/ found — skipping script injection."
         fi
 
     - name: Build package
@@ -74,17 +92,16 @@ runs:
       working-directory: ${{ inputs.working-directory }}
       env:
         ADDON_NAME: ${{ inputs.addon-name != '' && inputs.addon-name || github.event.repository.name }}
-        VERSION: ${{ inputs.version }}
-        BP_DIR: ${{ steps.detect.outputs.bp_dir }}
-        RP_DIR: ${{ steps.detect.outputs.rp_dir }}
-        EXT: ${{ steps.detect.outputs.extension }}
+        VERSION:    ${{ inputs.version }}
+        BP_DIR:     ${{ steps.detect.outputs.bp_dir }}
+        RP_DIR:     ${{ steps.detect.outputs.rp_dir }}
+        EXT:        ${{ steps.detect.outputs.extension }}
       run: |
         PACKAGE_NAME="${ADDON_NAME}-${VERSION}.${EXT}"
         STAGING_DIR="_staging_${ADDON_NAME}"
 
         mkdir -p "$STAGING_DIR"
 
-        # For .mcaddon both packs go inside; for .mcpack only the detected one
         if [ -n "$BP_DIR" ]; then
           cp -r "$BP_DIR" "$STAGING_DIR/"
         fi
@@ -92,7 +109,6 @@ runs:
           cp -r "$RP_DIR" "$STAGING_DIR/"
         fi
 
-        # Zip → rename extension
         cd "$STAGING_DIR"
         zip -r "../${PACKAGE_NAME}" .
         cd ..
