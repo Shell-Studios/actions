@@ -1,5 +1,6 @@
 # actions
 
+> [!NOTE]
 > Centralised CI/CD system for Minecraft add-on repositories in this organisation.  
 > **One change here → every add-on repo gets the update automatically.**
 
@@ -56,6 +57,7 @@ git push origin v1.2.0 v1 --force
 my-addon-repo/
 ├── behavior_pack/      (or BP/)
 ├── resource_pack/      (or RP/)
+├── scripts/            (TS files)
 ├── release_notes.md    ← shown in GitHub Release + Discord embed
 └── .github/
     └── workflows/
